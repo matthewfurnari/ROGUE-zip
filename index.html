@@ -1,0 +1,885 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>HCL Simple: Ontology Trainer v8 (Manual Control)</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/3.9.1/chart.min.js"></script>
+    <style>
+        body { background-color: #0f172a; color: #e2e8f0; font-family: 'Segoe UI', system-ui, sans-serif; }
+        .panel { background-color: #1e293b; border: 1px solid #334155; border-radius: 8px; overflow: hidden; display: flex; flex-direction: column; }
+        .btn { transition: all 0.2s; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; font-size: 0.75rem; }
+        .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+        .stat-val { font-size: 1.5rem; font-weight: bold; line-height: 1; color: #38bdf8; }
+        .stat-lbl { font-size: 0.7rem; color: #94a3b8; text-transform: uppercase; margin-bottom: 0.25rem; font-weight: 600; }
+        canvas { width: 100%; height: 100%; }
+
+        .tab-btn {
+            flex: 1;
+            padding-top: 0.75rem;
+            padding-bottom: 0.75rem;
+            text-align: center;
+            font-size: 0.75rem;
+            font-weight: 700;
+            color: #94a3b8;
+            background-color: #020617;
+            border-bottom: 2px solid #1f2937;
+            transition: background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+        }
+        .tab-btn:hover {
+            background-color: #0f172a;
+            color: #e2e8f0;
+        }
+        .tab-btn.active {
+            color: #38bdf8;
+            border-color: #38bdf8;
+            background-color: #0f172a;
+        }
+
+        .data-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 1rem; }
+    </style>
+</head>
+<body class="h-screen flex flex-col overflow-hidden text-sm">
+
+    <header class="bg-slate-900 border-b border-slate-800 shrink-0 flex flex-col z-20 shadow-lg">
+        <div class="p-4 flex justify-between items-center">
+            <div>
+                <h1 class="text-xl font-bold text-sky-400 flex items-center gap-2">
+                    HCL Trainer v8
+                    <span class="px-2 py-0.5 bg-pink-900 text-pink-300 text-[10px] rounded-full">Manual Control</span>
+                </h1>
+                <p class="text-xs text-slate-500 mt-1">Status: <span id="sys-status" class="text-slate-300">Idle</span></p>
+            </div>
+
+            <div class="flex gap-4 items-center">
+                
+                 <!-- Operation Mode -->
+                 <div class="flex items-center bg-slate-800 rounded-lg border border-slate-700 p-1">
+                    <button id="mode-train" onclick="app.setMode('train')" class="px-3 py-1 rounded text-xs font-bold bg-slate-600 text-white shadow">
+                        TRAIN
+                    </button>
+                    <button id="mode-zip" onclick="app.setMode('zip')" class="px-3 py-1 rounded text-xs font-bold text-slate-400 hover:text-white">
+                        ZIP (Handover)
+                    </button>
+                </div>
+
+                <div class="h-8 w-px bg-slate-700 mx-2"></div>
+
+                <!-- Activation Selector -->
+                <div class="flex items-center gap-2 bg-slate-800 px-2 py-1 rounded-lg border border-slate-700 text-xs">
+                    <span class="text-slate-400">Act:</span>
+                    <select id="sel-activation" 
+                            class="bg-slate-900 border border-slate-700 rounded px-2 py-1 text-xs text-amber-400 font-bold"
+                            onchange="app.setActivation(this.value)">
+                        <option value="relu">ReLU</option>
+                        <option value="leaky" selected>Leaky ReLU</option>
+                        <option value="linear">Linear</option>
+                    </select>
+                </div>
+
+                <!-- Level Selector (Always Enabled) -->
+                <div class="flex items-center gap-2 bg-slate-800 px-2 py-1 rounded-lg border border-slate-700 text-xs">
+                    <span class="text-slate-400">Level:</span>
+                    <select id="sel-onto-level"
+                            class="bg-slate-900 border border-slate-700 rounded px-2 py-1 text-xs"
+                            onchange="app.selectOntoLevel(parseInt(this.value,10))">
+                        <option value="0">L0: Living vs Non (2)</option>
+                        <option value="1">L1: Moves vs Static (2)</option>
+                        <option value="2" selected>L2: Coarse (6)</option>
+                        <option value="3">L3: Subgroups (48)</option>
+                        <option value="4">L4: Species (768)</option>
+                    </select>
+                </div>
+
+                <div class="h-8 w-px bg-slate-700 mx-2"></div>
+
+                <button id="btn-action" onclick="app.toggleRun()" class="btn px-8 py-3 bg-green-600 hover:bg-green-500 text-white rounded shadow-lg shadow-green-900/30 min-w-[140px] text-sm">
+                    START
+                </button>
+            </div>
+        </div>
+
+        <div class="flex border-t border-slate-700">
+            <button id="tab-dash" onclick="app.switchTab('dash')" class="tab-btn active">
+                📊 DASHBOARD & VISUALIZATION
+            </button>
+            <button id="tab-data" onclick="app.switchTab('data')" class="tab-btn">
+                🧬 DATA SOURCE INSPECTOR
+            </button>
+        </div>
+    </header>
+
+    <main class="flex-1 overflow-hidden relative bg-slate-950">
+        <div id="view-dash" class="absolute inset-0 p-4 flex gap-4">
+            <div class="w-72 flex flex-col gap-4 shrink-0">
+                <div class="panel p-5 gap-6">
+                    <div class="flex justify-between border-b border-slate-700 pb-2">
+                        <span class="text-xs font-bold text-slate-400">TRAINING METRICS</span>
+                        <div id="loader" class="w-2 h-2 rounded-full bg-green-500 animate-pulse opacity-0"></div>
+                    </div>
+                    <div class="space-y-6">
+                        <div>
+                            <div class="stat-lbl">Epoch</div>
+                            <div id="val-epoch" class="font-mono text-3xl text-white">0</div>
+                        </div>
+                        <div>
+                            <div class="stat-lbl">Phase</div>
+                            <div id="val-phase" class="text-xs text-slate-200 uppercase tracking-wider">Train</div>
+                        </div>
+                        <div>
+                            <div class="stat-lbl">Zip Identity Pressure</div>
+                            <!-- Added Visualizer for Ramp -->
+                            <div class="w-full bg-slate-800 h-2 rounded-full mt-1 overflow-hidden">
+                                <div id="val-ramp-bar" class="h-full bg-purple-500 w-0 transition-all duration-300"></div>
+                            </div>
+                            <div id="val-ramp-text" class="text-[10px] text-purple-400 text-right mt-1">0%</div>
+                        </div>
+                        <div>
+                            <div class="stat-lbl">Selected Level Accuracy</div>
+                            <div id="val-acc-sel" class="stat-val">-</div>
+                        </div>
+                        <div>
+                            <div class="stat-lbl">Coarse Accuracy (L2)</div>
+                            <div id="val-acc-l2" class="stat-val">-</div>
+                        </div>
+                        <div>
+                            <div class="stat-lbl">Block 4 Offdiag</div>
+                            <div id="val-offdiag" class="text-xs font-mono text-slate-400">-</div>
+                        </div>
+                        <div>
+                            <div class="stat-lbl">Block 4 DiagErr</div>
+                            <div id="val-diagerr" class="text-xs font-mono text-slate-400">-</div>
+                        </div>
+                        <div>
+                            <div class="stat-lbl">Current Loss</div>
+                            <div id="val-loss" class="text-lg font-mono text-slate-400">0.000</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="panel flex-1 p-4 relative min-h-[150px]">
+                    <div class="stat-lbl absolute top-3 left-4 z-10 bg-slate-900/80 px-1 rounded">Event Log</div>
+                    <div id="log-window" class="mt-5 text-[11px] font-mono text-slate-200 h-full overflow-y-auto whitespace-pre-wrap"></div>
+                </div>
+
+                <div class="panel flex-1 p-4 relative min-h-[200px]">
+                    <div class="stat-lbl absolute top-3 left-4 z-10 bg-slate-900/80 px-1 rounded">Last Layer Activations</div>
+                    <canvas id="cvs-act"></canvas>
+                </div>
+            </div>
+
+            <div class="flex-1 flex flex-col gap-4 overflow-hidden">
+                <div class="panel flex-[2] p-4 relative min-h-0">
+                    <div class="stat-lbl absolute top-3 left-4 z-10 bg-slate-900/80 px-1 rounded">Live Accuracy History</div>
+                    <canvas id="chart-acc"></canvas>
+                </div>
+
+                <div class="h-48 flex gap-3 shrink-0">
+                    <div class="panel flex-1 bg-slate-900"><div class="px-2 py-1 text-[10px] text-slate-500 text-center">Block 1</div><canvas id="cvs-w1"></canvas></div>
+                    <div class="panel flex-1 bg-slate-900"><div class="px-2 py-1 text-[10px] text-slate-500 text-center">Block 2</div><canvas id="cvs-w2"></canvas></div>
+                    <div class="panel flex-1 bg-slate-900"><div class="px-2 py-1 text-[10px] text-slate-500 text-center">Block 3</div><canvas id="cvs-w3"></canvas></div>
+                    <div class="panel flex-1 bg-slate-900"><div class="px-2 py-1 text-[10px] text-slate-500 text-center">Block 4 (Zipping Target)</div><canvas id="cvs-w4"></canvas></div>
+                </div>
+            </div>
+        </div>
+
+        <div id="view-data" class="absolute inset-0 p-8 overflow-y-auto hidden bg-slate-900">
+            <div class="max-w-6xl mx-auto">
+                <div class="flex justify-between items-end mb-8 pb-4 border-b border-slate-800">
+                    <div>
+                        <h2 class="text-2xl font-bold text-white mb-2">Training Set Inspector</h2>
+                        <p class="text-slate-400 text-sm">
+                            Real-time view of the ontology feature vectors being fed to the network.
+                        </p>
+                    </div>
+                    <div class="flex gap-4 items-center">
+                        <div class="text-right text-xs text-slate-500 mr-4">
+                            <div class="flex items-center justify-end gap-2 mb-1"><span class="w-3 h-3 bg-red-400 rounded-sm"></span> Positive Value</div>
+                            <div class="flex items-center justify-end gap-2"><span class="w-3 h-3 bg-sky-400 rounded-sm"></span> Negative Value</div>
+                        </div>
+                        <button onclick="app.renderDataInspector()" class="btn px-6 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded border border-slate-600">
+                            Regenerate Batch
+                        </button>
+                    </div>
+                </div>
+
+                <div class="data-grid" id="data-grid"></div>
+            </div>
+        </div>
+
+    </main>
+
+<script>
+const RND_SEED = 42;
+let _seed = RND_SEED;
+let _gaussSpare = null;
+
+function seededRandom() {
+    const x = Math.sin(_seed++) * 10000;
+    return x - Math.floor(x);
+}
+
+function randomNormal() {
+    if (_gaussSpare !== null) {
+        const v = _gaussSpare;
+        _gaussSpare = null;
+        return v;
+    }
+    let u = 0;
+    let v = 0;
+    while (u === 0) u = seededRandom();
+    while (v === 0) v = seededRandom();
+    const mag = Math.sqrt(-2.0 * Math.log(u));
+    const z0 = mag * Math.cos(2 * Math.PI * v);
+    const z1 = mag * Math.sin(2 * Math.PI * v);
+    _gaussSpare = z1;
+    return z0;
+}
+
+class Mat {
+    constructor(rows, cols, fill = 0) {
+        this.rows = rows;
+        this.cols = cols;
+        this.data = new Float32Array(rows * cols).fill(fill);
+        this.grad = new Float32Array(rows * cols).fill(0);
+    }
+    static rand(rows, cols, scale = 0.1) {
+        const m = new Mat(rows, cols);
+        for (let i = 0; i < m.data.length; i++) {
+            m.data[i] = (seededRandom() * 2 - 1) * scale;
+        }
+        return m;
+    }
+}
+
+const Ops = {
+    matMul: (A, B) => {
+        const C = new Mat(A.rows, B.cols);
+        for (let r = 0; r < A.rows; r++) {
+            for (let c = 0; c < B.cols; c++) {
+                let sum = 0;
+                for (let k = 0; k < A.cols; k++) {
+                    sum += A.data[r * A.cols + k] * B.data[k * B.cols + c];
+                }
+                C.data[r * B.cols + c] = sum;
+            }
+        }
+        C._backward = () => {
+            for (let r = 0; r < A.rows; r++) {
+                for (let c = 0; c < B.cols; c++) {
+                    const g = C.grad[r * B.cols + c];
+                    for (let k = 0; k < A.cols; k++) {
+                        A.grad[r * A.cols + k] += g * B.data[k * B.cols + c];
+                        B.grad[k * B.cols + c] += g * A.data[r * A.cols + k];
+                    }
+                }
+            }
+        };
+        return C;
+    },
+    add: (A, B) => {
+        const C = new Mat(A.rows, A.cols);
+        for (let i = 0; i < A.data.length; i++) {
+            C.data[i] = A.data[i] + B.data[i % B.data.length];
+        }
+        C._backward = () => {
+            for (let i = 0; i < A.data.length; i++) {
+                const g = C.grad[i];
+                A.grad[i] += g;
+                B.grad[i % B.data.length] += g;
+            }
+        };
+        return C;
+    },
+    leakyRelu: (A, alpha = 0.01) => {
+        const C = new Mat(A.rows, A.cols);
+        for (let i = 0; i < A.data.length; i++) {
+            C.data[i] = A.data[i] > 0 ? A.data[i] : alpha * A.data[i];
+        }
+        C._backward = () => {
+            for (let i = 0; i < A.data.length; i++) {
+                const gradScale = A.data[i] > 0 ? 1 : alpha;
+                A.grad[i] += gradScale * C.grad[i];
+            }
+        };
+        return C;
+    },
+    softmaxCrossEntropy: (Logits, TargetIdx) => {
+        let max = -Infinity;
+        for (let i = 0; i < Logits.data.length; i++) {
+            if (Logits.data[i] > max) max = Logits.data[i];
+        }
+        const exps = new Float32Array(Logits.data.length);
+        let sum = 0;
+        for (let i = 0; i < Logits.data.length; i++) {
+            const e = Math.exp(Logits.data[i] - max);
+            exps[i] = e;
+            sum += e;
+        }
+        const probs = new Float32Array(Logits.data.length);
+        for (let i = 0; i < exps.length; i++) {
+            probs[i] = exps[i] / sum;
+        }
+        const loss = -Math.log(probs[TargetIdx] + 1e-7);
+        for (let i = 0; i < Logits.cols; i++) {
+            Logits.grad[i] += probs[i] - (i === TargetIdx ? 1 : 0);
+        }
+        return loss;
+    },
+    logitsMSE: (studentLogits, teacherLogits, lambdaKD = 1.0) => {
+        let loss = 0;
+        const n = studentLogits.data.length;
+        for (let i = 0; i < n; i++) {
+            const diff = studentLogits.data[i] - teacherLogits.data[i];
+            loss += diff * diff;
+            studentLogits.grad[i] += (2 * lambdaKD / n) * diff;
+        }
+        return (loss / n) * lambdaKD;
+    },
+    identityLossW: (W, lambdaI) => {
+        let loss = 0;
+        const rows = W.rows;
+        const cols = W.cols;
+        for (let r = 0; r < rows; r++) {
+            for (let c = 0; c < cols; c++) {
+                const idx = r * cols + c;
+                const target = r === c ? 1 : 0;
+                const diff = W.data[idx] - target;
+                loss += diff * diff;
+                W.grad[idx] += 2 * lambdaI * diff;
+            }
+        }
+        return lambdaI * loss;
+    },
+    biasZeroLoss: (b, lambdaB) => {
+        let loss = 0;
+        const n = b.data.length;
+        for (let i = 0; i < n; i++) {
+            const val = b.data[i];
+            loss += val * val;
+            b.grad[i] += 2 * lambdaB * val;
+        }
+        return lambdaB * loss;
+    }
+};
+
+const INPUT_DIM = 8;
+const LEVEL_CLASS_COUNTS = [2, 2, 6, 48, 768];
+
+class OntologyGen {
+    static getBatch(size) {
+        const X = [];
+        const labels = [];
+        const noise = 0.15;
+        for (let i = 0; i < size; i++) {
+            const living = seededRandom() > 0.5 ? 1 : 0;
+            const moves = (living && seededRandom() > 0.2) || (!living && seededRandom() > 0.8) ? 1 : 0;
+            const fur = living && seededRandom() > 0.4 ? 1 : 0;
+            const legs = living && moves && seededRandom() > 0.3 ? 1 : 0;
+            const barks = fur && legs && seededRandom() > 0.85 ? 1 : 0;
+            const sizeFeat = seededRandom();
+            const water = living && seededRandom() > 0.7 ? 1 : 0;
+            const green = !living || (!moves && seededRandom() > 0.6) ? 1 : 0;
+            const base = [living, moves, fur, legs, barks, sizeFeat, water, green];
+            const feats = new Float32Array(INPUT_DIM);
+            for (let j = 0; j < INPUT_DIM; j++) {
+                let v = base[j] + randomNormal() * noise;
+                if (v < 0) v = 0;
+                if (v > 1) v = 1;
+                feats[j] = v;
+            }
+            X.push(feats);
+            const lbl0 = living ? 0 : 1;
+            const lbl1 = moves ? 0 : 1;
+            let lbl2;
+            if (living) {
+                if (fur) lbl2 = 0;
+                else if (water) lbl2 = 1;
+                else lbl2 = 2;
+            } else {
+                if (moves) lbl2 = 3;
+                else if (green) lbl2 = 4;
+                else lbl2 = 5;
+            }
+            const lbl3 = Math.floor(seededRandom() * 8) + lbl2 * 8;
+            const lbl4 = Math.floor(seededRandom() * 16) + lbl3 * 16;
+            labels.push([lbl0, lbl1, lbl2, lbl3, lbl4]);
+        }
+        return { X, labels };
+    }
+
+    static getLabelName(level, y) {
+        if (level === 0) return y === 0 ? 'Living' : 'Non-living';
+        if (level === 1) return y === 0 ? 'Moves' : 'Static';
+        if (level === 2) {
+            const names = ['Mammal', 'Fish', 'Bird/Insect', 'Vehicle', 'Plant', 'Furniture/Object'];
+            return names[y] || 'Class ' + y;
+        }
+        if (level === 3) return 'Subgroup ' + y;
+        if (level === 4) return 'Species ' + y;
+        return 'Class ' + y;
+    }
+}
+
+const DIM = 16;
+
+class DeepModel {
+    constructor() {
+        this.blocks = [];
+        for (let i = 0; i < 4; i++) {
+            const inDim = i === 0 ? INPUT_DIM : DIM;
+            this.blocks.push({ W: Mat.rand(inDim, DIM, 0.2), b: new Mat(1, DIM) });
+        }
+        this.heads = [
+            { W: Mat.rand(DIM, LEVEL_CLASS_COUNTS[0], 0.2), b: new Mat(1, LEVEL_CLASS_COUNTS[0]) },
+            { W: Mat.rand(DIM, LEVEL_CLASS_COUNTS[1], 0.2), b: new Mat(1, LEVEL_CLASS_COUNTS[1]) },
+            { W: Mat.rand(DIM, LEVEL_CLASS_COUNTS[2], 0.2), b: new Mat(1, LEVEL_CLASS_COUNTS[2]) },
+            { W: Mat.rand(DIM, LEVEL_CLASS_COUNTS[3], 0.2), b: new Mat(1, LEVEL_CLASS_COUNTS[3]) },
+            { W: Mat.rand(DIM, LEVEL_CLASS_COUNTS[4], 0.2), b: new Mat(1, LEVEL_CLASS_COUNTS[4]) }
+        ];
+        this.velocity = new Map();
+    }
+
+    clone() {
+        const m = new DeepModel();
+        for (let i = 0; i < this.blocks.length; i++) {
+            m.blocks[i].W.data.set(this.blocks[i].W.data);
+            m.blocks[i].b.data.set(this.blocks[i].b.data);
+        }
+        for (let i = 0; i < this.heads.length; i++) {
+            m.heads[i].W.data.set(this.heads[i].W.data);
+            m.heads[i].b.data.set(this.heads[i].b.data);
+        }
+        return m;
+    }
+
+    forward(inputVec, levelIdx, actAlpha = 0.01) {
+        const x = new Mat(1, INPUT_DIM);
+        x.data.set(inputVec);
+        const nodes = [];
+        let curr = x;
+        for (let i = 0; i < 4; i++) {
+            const mm = Ops.matMul(curr, this.blocks[i].W);
+            const z = Ops.add(mm, this.blocks[i].b);
+            const h = Ops.leakyRelu(z, actAlpha);
+            nodes.push(mm, z, h);
+            curr = h;
+        }
+        const head = this.heads[levelIdx];
+        const mmHead = Ops.matMul(curr, head.W);
+        const logits = Ops.add(mmHead, head.b);
+        nodes.push(mmHead, logits);
+        return { x, nodes, logits, lastHidden: curr };
+    }
+
+    backward(graph) {
+        for (let i = graph.nodes.length - 1; i >= 0; i--) {
+            if (graph.nodes[i]._backward) graph.nodes[i]._backward();
+        }
+    }
+
+    update(lr) {
+        const params = [
+            ...this.blocks.map(b => [b.W, b.b]).flat(),
+            ...this.heads.map(h => [h.W, h.b]).flat()
+        ];
+        params.forEach(p => {
+            if (!this.velocity.has(p)) this.velocity.set(p, new Float32Array(p.data.length).fill(0));
+            const v = this.velocity.get(p);
+            for (let i = 0; i < p.data.length; i++) {
+                let g = p.grad[i];
+                if (g > 1.0) g = 1.0;
+                if (g < -1.0) g = -1.0;
+                v[i] = 0.9 * v[i] - lr * g;
+                p.data[i] += v[i];
+                p.grad[i] = 0;
+            }
+        });
+    }
+}
+
+var app = {
+    model: new DeepModel(),
+    running: false,
+    epoch: 0,
+    ontoLevelIndex: 2,
+    phase: 'train', // 'train' or 'zip'
+    teacherModel: null,
+    zipEpoch: 0,
+    metrics: { coarse: [], fine: [] },
+    LR: 0.001,
+    BATCH: 32,
+    activeTab: 'dash',
+    lastUpdateVis: 0,
+    
+    // Config
+    actType: 'leaky',
+    
+    // Zipping Params (Stabilized)
+    ZIP_IDENTITY_LAMBDA_W: 1.0, 
+    ZIP_IDENTITY_LAMBDA_B: 0.05,
+    ZIP_KD_LAMBDA: 1.0,
+    RAMP_EPOCHS: 2500, 
+    MAX_LOG: 200,
+    logEntries: [],
+
+    init: function () {
+        this.initCharts();
+        this.selectOntoLevel(2);
+        this.updateVis();
+        this.renderDataInspector();
+        this.updatePhaseUI();
+        this.log('Ready. Manual Mode Enabled.');
+    },
+
+    setMode: function(mode) {
+        this.phase = mode;
+        const trainBtn = document.getElementById('mode-train');
+        const zipBtn = document.getElementById('mode-zip');
+        
+        if (mode === 'train') {
+            trainBtn.className = "px-3 py-1 rounded text-xs font-bold bg-slate-600 text-white shadow";
+            zipBtn.className = "px-3 py-1 rounded text-xs font-bold text-slate-400 hover:text-white";
+            this.teacherModel = null;
+            this.log('Switched to TRAINING mode.');
+        } else {
+            zipBtn.className = "px-3 py-1 rounded text-xs font-bold bg-pink-700 text-white shadow";
+            trainBtn.className = "px-3 py-1 rounded text-xs font-bold text-slate-400 hover:text-white";
+            this.zipEpoch = 0; // Reset ramp
+            // Snap teacher immediately
+            this.teacherModel = this.model.clone();
+            this.log('Switched to ZIPPING mode. Teacher snapshot taken.');
+        }
+        this.updatePhaseUI();
+    },
+
+    setActivation: function(type) {
+        this.actType = type;
+        this.log('Activation changed to: ' + type);
+    },
+
+    getAlpha: function() {
+        if (this.actType === 'relu') return 0;
+        if (this.actType === 'leaky') return 0.01;
+        if (this.actType === 'linear') return 1.0;
+        return 0.01;
+    },
+
+    log: function (message) {
+        const ts = new Date().toLocaleTimeString();
+        const line = '[' + ts + '] ' + message;
+        this.logEntries.push(line);
+        if (this.logEntries.length > this.MAX_LOG) this.logEntries.shift();
+        const el = document.getElementById('log-window');
+        if (el) {
+            el.textContent = this.logEntries.join('\n');
+            el.scrollTop = el.scrollHeight;
+        }
+    },
+
+    switchTab: function (tab) {
+        this.activeTab = tab;
+        document.getElementById('tab-dash').className = tab === 'dash' ? 'tab-btn active' : 'tab-btn';
+        document.getElementById('tab-data').className = tab === 'data' ? 'tab-btn active' : 'tab-btn';
+        document.getElementById('view-dash').style.display = tab === 'dash' ? 'flex' : 'none';
+        document.getElementById('view-data').style.display = tab === 'data' ? 'block' : 'none';
+    },
+
+    selectOntoLevel: function (levelIdx) {
+        this.ontoLevelIndex = levelIdx;
+        const sel = document.getElementById('sel-onto-level');
+        if (sel && parseInt(sel.value, 10) !== levelIdx) sel.value = String(levelIdx);
+        this.renderDataInspector();
+        this.log('Selected ontology level L' + levelIdx + '.');
+    },
+
+    toggleRun: function () {
+        this.running = !this.running;
+        const btn = document.getElementById('btn-action');
+        const status = document.getElementById('sys-status');
+        const actSel = document.getElementById('sel-activation');
+        if (this.running) {
+            btn.innerText = 'PAUSE';
+            btn.className = 'btn px-8 py-3 bg-yellow-600 hover:bg-yellow-500 text-white rounded shadow-lg shadow-yellow-900/30 min-w-[140px]';
+            document.getElementById('loader').style.opacity = '1';
+            status.innerText = 'Running...';
+            status.className = 'text-green-400 font-bold animate-pulse';
+            actSel.disabled = true;
+            this.log('System Running. Mode: ' + this.phase.toUpperCase());
+            this.loop();
+        } else {
+            btn.innerText = 'RESUME';
+            btn.className = 'btn px-8 py-3 bg-green-600 hover:bg-green-500 text-white rounded shadow-lg shadow-green-900/30 min-w-[140px]';
+            document.getElementById('loader').style.opacity = '0';
+            status.innerText = 'Paused';
+            status.className = 'text-yellow-400 font-bold';
+            actSel.disabled = false;
+            this.log('System Paused.');
+        }
+    },
+
+    block4IdentityScore: function () {
+        const W = this.model.blocks[3].W;
+        const rows = W.rows;
+        const cols = W.cols;
+        let offDiag = 0;
+        let diagErr = 0;
+        for (let r = 0; r < rows; r++) {
+            for (let c = 0; c < cols; c++) {
+                const idx = r * cols + c;
+                const val = W.data[idx];
+                if (r === c) {
+                    const diff = val - 1;
+                    diagErr += diff * diff;
+                } else {
+                    offDiag += val * val;
+                }
+            }
+        }
+        return { offDiag, diagErr };
+    },
+
+    updatePhaseUI: function () {
+        const phaseEl = document.getElementById('val-phase');
+        if (phaseEl) phaseEl.innerText = this.phase === 'zip' ? 'Zip' : 'Train';
+        
+        // Update Ramp Visualization
+        const rampBar = document.getElementById('val-ramp-bar');
+        const rampText = document.getElementById('val-ramp-text');
+        if(this.phase === 'zip') {
+             const progress = Math.min(1, this.zipEpoch / this.RAMP_EPOCHS);
+             const rampVal = progress * progress; // visual match to logic
+             const pct = Math.round(rampVal * 100);
+             rampBar.style.width = pct + '%';
+             rampText.innerText = pct + '% (Handover Pressure)';
+        } else {
+             rampBar.style.width = '0%';
+             rampText.innerText = '0%';
+        }
+    },
+
+    loop: function () {
+        if (!this.running) return;
+        let batchLoss = 0;
+        const alpha = this.getAlpha();
+
+        if (this.phase === 'train') {
+            const levelTrain = this.ontoLevelIndex;
+            const batch = OntologyGen.getBatch(this.BATCH);
+            for (let b = 0; b < this.BATCH; b++) {
+                const x = batch.X[b];
+                const target = batch.labels[b][levelTrain];
+                const graph = this.model.forward(x, levelTrain, alpha);
+                batchLoss += Ops.softmaxCrossEntropy(graph.logits, target);
+                this.model.backward(graph);
+            }
+            this.model.update(this.LR);
+        } else if (this.phase === 'zip') {
+            // In manual zip, we stay on the selected level, but zipping target is always block 4
+            // We use the selected level's Head for KD
+            const levelZip = this.ontoLevelIndex;
+            const batch = OntologyGen.getBatch(this.BATCH);
+            
+            // Check if teacher exists (safety)
+            if(!this.teacherModel) {
+                 this.teacherModel = this.model.clone();
+            }
+            const teacher = this.teacherModel;
+            const student = this.model;
+            
+            // 1. Accuracy Phase (Knowledge Distillation)
+            for (let b = 0; b < this.BATCH; b++) {
+                const x = batch.X[b];
+                const gT = teacher.forward(x, levelZip, alpha);
+                const gS = student.forward(x, levelZip, alpha);
+                batchLoss += Ops.logitsMSE(gS.logits, gT.logits, this.ZIP_KD_LAMBDA);
+                student.backward(gS);
+            }
+
+            // 2. Identity Phase (Handover)
+            const head = student.heads[levelZip];
+            head.W.grad.fill(0);
+            head.b.grad.fill(0);
+
+            const block4 = student.blocks[3];
+
+            // Calculate RAMP
+            let progress = Math.min(1, this.zipEpoch / this.RAMP_EPOCHS);
+            progress = progress * progress;
+
+            const curLambdaW = this.ZIP_IDENTITY_LAMBDA_W * progress;
+            const curLambdaB = this.ZIP_IDENTITY_LAMBDA_B * progress;
+
+            batchLoss += Ops.identityLossW(block4.W, curLambdaW);
+            batchLoss += Ops.biasZeroLoss(block4.b, curLambdaB);
+            
+            student.update(this.LR);
+            this.zipEpoch++;
+        }
+        this.epoch++;
+        const now = performance.now();
+        if (now - this.lastUpdateVis > 100) {
+            this.lastUpdateVis = now;
+            const evalLevelIdx = this.ontoLevelIndex;
+            const trainingAcc = this.evalLevel(evalLevelIdx, 100);
+            const coarseAcc = this.evalLevel(2, 100);
+            const fineAcc = this.evalLevel(3, 100);
+            const idScore = this.block4IdentityScore();
+            if (this.epoch % 2 === 0) {
+                this.metrics.coarse.push(coarseAcc);
+                this.metrics.fine.push(fineAcc);
+            }
+            document.getElementById('val-epoch').innerText = this.epoch;
+            document.getElementById('val-loss').innerText = (batchLoss / this.BATCH).toFixed(3);
+            document.getElementById('val-acc-sel').innerText = Math.round(trainingAcc * 100) + '%';
+            document.getElementById('val-acc-l2').innerText = Math.round(coarseAcc * 100) + '%';
+            document.getElementById('val-offdiag').innerText = idScore.offDiag.toFixed(3);
+            document.getElementById('val-diagerr').innerText = idScore.diagErr.toFixed(3);
+            this.updatePhaseUI();
+            this.updateVis();
+            
+            // No auto switching. User controls everything.
+        }
+        setTimeout(() => this.loop(), 0);
+    },
+
+    evalLevel: function (levelIdx, N) {
+        let corr = 0;
+        const alpha = this.getAlpha();
+        for (let i = 0; i < N; i++) {
+            const batch = OntologyGen.getBatch(1);
+            const x = batch.X[0];
+            const target = batch.labels[0][levelIdx];
+            const g = this.model.forward(x, levelIdx, alpha);
+            let maxI = 0;
+            for (let k = 1; k < g.logits.cols; k++) {
+                if (g.logits.data[k] > g.logits.data[maxI]) maxI = k;
+            }
+            if (maxI === target) corr++;
+        }
+        return corr / N;
+    },
+
+    renderDataInspector: function () {
+        const container = document.getElementById('data-grid');
+        if (!container) return;
+        container.innerHTML = '';
+        const batch = OntologyGen.getBatch(9);
+        const level = this.ontoLevelIndex;
+        for (let idx = 0; idx < batch.X.length; idx++) {
+            const vec = batch.X[idx];
+            const lbl = batch.labels[idx][level];
+            const card = document.createElement('div');
+            card.className = 'bg-slate-800/50 rounded border border-slate-700 p-4 hover:bg-slate-800 transition';
+            const header = document.createElement('div');
+            header.className = 'flex justify-between items-center mb-3';
+            header.innerHTML = '<span class="text-xs font-bold text-white">' + OntologyGen.getLabelName(level, lbl) + '</span>' +
+                '<span class="text-[10px] text-slate-500 font-mono">L' + level + ':' + lbl + '</span>';
+            card.appendChild(header);
+            const viz = document.createElement('div');
+            viz.className = 'h-16 flex items-end gap-1 bg-slate-900 rounded p-2 border border-slate-800/50';
+            for (let i = 0; i < vec.length; i++) {
+                const v = vec[i];
+                const bar = document.createElement('div');
+                const hPct = Math.min(100, Math.abs(v) * 120);
+                bar.style.height = hPct + '%';
+                bar.className = 'flex-1 rounded-sm ' + (v > 0.5 ? 'bg-red-500/80' : 'bg-sky-500/80') + ' hover:opacity-100 transition-opacity';
+                if (i === 5) bar.style.marginLeft = '4px';
+                viz.appendChild(bar);
+            }
+            card.appendChild(viz);
+            const footer = document.createElement('div');
+            footer.className = 'mt-2 flex justify-between text-[10px] text-slate-500 uppercase font-bold tracking-wider';
+            footer.innerHTML = '<span>Structural</span><span>Contextual</span>';
+            card.appendChild(footer);
+            container.appendChild(card);
+        }
+    },
+
+    updateVis: function () {
+        if (this.activeTab !== 'dash') return;
+        if (window.chartAcc) {
+            const cData = this.metrics.coarse.length > 200 ? this.metrics.coarse.slice(-200) : this.metrics.coarse;
+            const fData = this.metrics.fine.length > 200 ? this.metrics.fine.slice(-200) : this.metrics.fine;
+            window.chartAcc.data.datasets[0].data = cData;
+            window.chartAcc.data.datasets[1].data = fData;
+            window.chartAcc.data.labels = Array(cData.length).fill(0).map((_, i) => i);
+            window.chartAcc.update('none');
+        }
+        this.drawMatrix('cvs-w1', this.model.blocks[0].W);
+        this.drawMatrix('cvs-w2', this.model.blocks[1].W);
+        this.drawMatrix('cvs-w3', this.model.blocks[2].W);
+        this.drawMatrix('cvs-w4', this.model.blocks[3].W);
+        this.drawActivations('cvs-act');
+    },
+
+    initCharts: function () {
+        const ctx = document.getElementById('chart-acc').getContext('2d');
+        window.chartAcc = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: [],
+                datasets: [
+                    { label: 'L2 (Coarse)', data: [], borderColor: '#4ade80', borderWidth: 2, pointRadius: 0, tension: 0.1 },
+                    { label: 'L3 (Fine)', data: [], borderColor: '#38bdf8', borderWidth: 2, pointRadius: 0, tension: 0.1 }
+                ]
+            },
+            options: {
+                animation: false,
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    y: { min: 0, max: 1, grid: { color: '#334155' } },
+                    x: { display: false }
+                },
+                plugins: {
+                    legend: { labels: { color: '#94a3b8', font: { size: 10 } } }
+                }
+            }
+        });
+    },
+
+    drawMatrix: function (id, mat) {
+        const c = document.getElementById(id);
+        const ctx = c.getContext('2d');
+        c.width = c.clientWidth;
+        c.height = c.clientHeight;
+        const cw = c.width / mat.cols;
+        const ch = c.height / mat.rows;
+        for (let r = 0; r < mat.rows; r++) {
+            for (let k = 0; k < mat.cols; k++) {
+                const v = mat.data[r * mat.cols + k];
+                const a = Math.min(1, Math.abs(v) * 1.5);
+                ctx.fillStyle = v > 0 ? 'rgba(56, 189, 248,' + a + ')' : 'rgba(248, 113, 113,' + a + ')';
+                ctx.fillRect(k * cw, r * ch, cw, ch);
+            }
+        }
+    },
+
+    drawActivations: function (id) {
+        const c = document.getElementById(id);
+        const ctx = c.getContext('2d');
+        c.width = c.clientWidth;
+        c.height = c.clientHeight;
+        const dim = DIM;
+        const pad = 10;
+        const batch = OntologyGen.getBatch(1);
+        const g = this.model.forward(batch.X[0], this.ontoLevelIndex, this.getAlpha());
+        const h = g.lastHidden;
+        const barW = (c.width - pad) / dim;
+        ctx.clearRect(0, 0, c.width, c.height);
+        for (let i = 0; i < dim; i++) {
+            const val = h.data[i];
+            const lit = Math.min(1, Math.max(0, val));
+            const hBar = lit * c.height;
+            ctx.fillStyle = lit > 0.1 ? '#38bdf8' : '#334155';
+            ctx.fillRect(5 + i * barW, c.height - hBar, barW - 1, hBar);
+        }
+    }
+};
+
+app.init();
+</script>
+</body>
+</html>
